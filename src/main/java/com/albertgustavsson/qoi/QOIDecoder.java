@@ -6,6 +6,8 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.Arrays;
 
+import javax.swing.*;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -17,6 +19,32 @@ public class QOIDecoder {
 
 	private Color previousPixel = new Color(0,0,0,255);
 	private final Color[] pixelArray = new Color[64];
+
+	public static void main(String[] args) throws IOException {
+		if (args.length < 1) {
+			logger.error("Required parameters: <filename>");
+		}
+		String filename = args[0];
+
+		QOIDecoder decoder = new QOIDecoder();
+		BufferedImage image = decoder.getImage(filename);
+
+		logger.debug("Image has been decoded.");
+
+		showImage(image);
+	}
+
+	private static void showImage(BufferedImage image) {
+		ImageIcon icon = new ImageIcon(image);
+		JFrame frame = new JFrame();
+		frame.setLayout(new FlowLayout());
+		frame.setSize(image.getWidth() + 50, image.getHeight() + 50);
+		JLabel lbl = new JLabel();
+		lbl.setIcon(icon);
+		frame.add(lbl);
+		frame.setVisible(true);
+		frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+	}
 
 	public QOIDecoder() {
 		Arrays.setAll(pixelArray, value -> new Color(0,0,0,0));
