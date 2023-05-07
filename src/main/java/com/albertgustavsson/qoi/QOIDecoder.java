@@ -13,50 +13,43 @@ import org.apache.logging.log4j.Logger;
 public class QOIDecoder {
 	private final static Logger logger = LogManager.getLogger(QOIDecoder.class);
 
-	private BufferedImage image;
-	private long pixelIndex = 0;
-
-	private Color previousPixel = new Color(0,0,0,255);
-	private final Color[] pixelArray = new Color[64];
-
 	public static void main(String[] args) throws IOException {
 		if (args.length < 1) {
 			logger.error("Required parameters: <filename>");
 		}
 		String filename = args[0];
 
-		QOIDecoder decoder = new QOIDecoder();
-		BufferedImage image = decoder.decode(filename);
+		BufferedImage image = QOIDecoder.decode(filename);
 
 		logger.debug("Image has been decoded.");
 
 		float scale;
 		if (image.getWidth() > image.getHeight()) {
-			scale = (float) 2500 /image.getWidth();
+			scale = (float) 1600 / image.getWidth();
 		} else {
-			scale = (float) 1400 /image.getHeight();
+			scale = (float) 900 / image.getHeight();
 		}
 		QOIUtils.showImage(image, scale);
 	}
 
-	public QOIDecoder() {
+	public static BufferedImage decode(String inputFileName) throws IOException {
+		BufferedImage image;
+		long pixelIndex = 0;
+		Color color = new Color(0,0,0,255);
+		final Color[] pixelArray = new Color[64];
 		Arrays.setAll(pixelArray, value -> new Color(0,0,0,0));
-	}
-
-	public BufferedImage decode(String inputFileName) throws IOException {
 		try (FileInputStream fileInputStream = new FileInputStream(inputFileName)) {
-			byte[] header = fileInputStream.readNBytes(14);
-			byte[] magicBytes = Arrays.copyOfRange(header, 0, 4);
+			byte[] magicBytes = fileInputStream.readNBytes(4);
 			assert new String(magicBytes).equals("qoif");
 
-			long width = QOIUtils.byteArrayToUnsignedInt(Arrays.copyOfRange(header, 4, 8), ByteOrder.BIG_ENDIAN);
-			long height = QOIUtils.byteArrayToUnsignedInt(Arrays.copyOfRange(header, 8, 12), ByteOrder.BIG_ENDIAN);
+			long width = QOIUtils.byteArrayToUnsignedInt(fileInputStream.readNBytes(4), ByteOrder.BIG_ENDIAN);
+			long height = QOIUtils.byteArrayToUnsignedInt(fileInputStream.readNBytes(4), ByteOrder.BIG_ENDIAN);
 			if (width > Integer.MAX_VALUE || height > Integer.MAX_VALUE) {
 				throw new IllegalArgumentException("Image dimensions exceed implementation limits. The maximum supported resolution is " + Integer.MAX_VALUE + " x " + Integer.MAX_VALUE);
 			}
 
-			byte channels = header[12];
-			byte colorSpace = header[13];
+			byte channels = fileInputStream.readNBytes(1)[0];
+			byte colorSpace = fileInputStream.readNBytes(1)[0];
 
 			int imageType;
 			if (channels == 3) {
@@ -71,122 +64,66 @@ public class QOIDecoder {
 			image = new BufferedImage((int) width, (int) height, imageType);
 
 			long totalPixels = width * height;
+
+			int runLengthCounter = 0;
 			while (pixelIndex < totalPixels) {
-				int chunkByte = fileInputStream.read();
-				if (chunkByte < 0) {
-					throw new IOException("File ended prematurely");
-				}
-				if (chunkByte == 255) {
-					// Chunk is QOI_OP_RGBA
-					handleChunkRGBA(fileInputStream);
-				} else if (chunkByte == 254) {
-					// Chunk is QOI_OP_RGB
-					handleChunkRGB(fileInputStream);
-				} else if (chunkByte >= 192) {
-					// Chunk is QOI_OP_RUN
-					handleChunkRun(chunkByte);
-				} else if (chunkByte >= 128) {
-					// Chunk is QOI_OP_LUMA
-					handleChunkLuma(fileInputStream, chunkByte);
-				} else if (chunkByte >= 64) {
-					// Chunk is QOI_OP_DIFF
-					handleChunkDiff(chunkByte);
+				if (runLengthCounter > 0) {
+					runLengthCounter--;
 				} else {
-					// Chunk is QOI_OP_INDEX
-					handleChunkIndex(chunkByte);
+					int chunkByte = fileInputStream.read();
+					if (chunkByte < 0) {
+						throw new IOException("File ended prematurely");
+					}
+					if (chunkByte == 255) {
+						// Chunk is QOI_OP_RGBA
+						byte[] chunkData = fileInputStream.readNBytes(4);
+						color = QOIUtils.bytesToColorRGBA(chunkData);
+						logger.debug("QOI_OP_RGBA (color: {})", QOIUtils.colorString(color));
+					} else if (chunkByte == 254) {
+						// Chunk is QOI_OP_RGB
+						byte[] chunkData = fileInputStream.readNBytes(3);
+						color = QOIUtils.bytesToColorRGB(chunkData, color.getAlpha());
+						logger.debug("QOI_OP_RGB (color: {})", QOIUtils.colorString(color));
+					} else if (chunkByte >= 192) {
+						// Chunk is QOI_OP_RUN
+						int runLength = chunkByte - 192 + 1; // How many times to repeat previous pixel
+						logger.debug("QOI_OP_RUN (length: {})", runLength);
+						runLengthCounter = runLength-1;
+					} else if (chunkByte >= 128) {
+						// Chunk is QOI_OP_LUMA
+						int diffByte = fileInputStream.read();
+						int diffGreen = chunkByte - 128 - 32;
+						int diffRed = ((diffByte >> 4) & 0x0F) - 8 + diffGreen;
+						int diffBlue = (diffByte & 0x0F) - 8 + diffGreen;
+						Color previousColor = color;
+						color = QOIUtils.colorApplyDiff(color, diffRed, diffGreen, diffBlue);
+						logger.debug("QOI_OP_LUMA (diff: [{}, {}, {}], previous: {}, color: {})", diffRed, diffGreen, diffBlue, QOIUtils.colorString(previousColor), QOIUtils.colorString(color));
+					} else if (chunkByte >= 64) {
+						// Chunk is QOI_OP_DIFF
+						int diffRed = ((chunkByte >> 4) & 0b11) - 2;
+						int diffGreen = ((chunkByte >> 2) & 0b11) - 2;
+						int diffBlue = (chunkByte & 0b11) - 2;
+						Color previousColor = color;
+						color = QOIUtils.colorApplyDiff(color, diffRed, diffGreen, diffBlue);
+						logger.debug("QOI_OP_DIFF (diff: [{}, {}, {}], previous: {}, color: {})", diffRed, diffGreen, diffBlue, QOIUtils.colorString(previousColor), QOIUtils.colorString(color));
+					} else {
+						// Chunk is QOI_OP_INDEX
+						int index = chunkByte & 0x3F;
+						color = pixelArray[index];
+						logger.debug("QOI_OP_INDEX (index: {}, color: {})", index, QOIUtils.colorString(color));
+					}
 				}
+
+				int pixelX = (int) (pixelIndex % image.getWidth());
+				int pixelY = (int) (pixelIndex / image.getWidth());
+				if (pixelY >= image.getHeight()) {
+					throw new IndexOutOfBoundsException("Pixel index is out of bounds for the given image");
+				}
+				image.setRGB(pixelX, pixelY, color.getRGB());
+				pixelArray[QOIUtils.colorHash(color)] = color;
+				pixelIndex++;
 			}
 			return image;
 		}
-	}
-
-	private void handleChunkIndex(int chunkByte) {
-		int index = chunkByte & 0x3F;
-		Color color = pixelArray[index];
-		logger.debug("QOI_OP_INDEX (index: {}, color: {})", index, QOIUtils.colorString(color));
-		setNextPixel(color);
-	}
-
-	private void handleChunkDiff(int chunkByte) {
-		int diffRed = ((chunkByte >> 4) & 0b11) - 2;
-		int diffGreen = ((chunkByte >> 2) & 0b11) - 2;
-		int diffBlue = (chunkByte & 0b11) - 2;
-
-		int red = QOIUtils.wrapByteValue(previousPixel.getRed() + diffRed);
-		int green = QOIUtils.wrapByteValue(previousPixel.getGreen() + diffGreen);
-		int blue = QOIUtils.wrapByteValue(previousPixel.getBlue() + diffBlue);
-		int alpha = previousPixel.getAlpha();
-		Color color = new Color(red, green, blue, alpha);
-		logger.debug("QOI_OP_DIFF (diff: [{}, {}, {}], previous: {}, color: {})", diffRed, diffGreen, diffBlue, QOIUtils.colorString(previousPixel), QOIUtils.colorString(color));
-		setNextPixel(color);
-	}
-
-	private void handleChunkLuma(FileInputStream fileInputStream, int chunkByte) throws IOException {
-		int diffByte = fileInputStream.read();
-		if (diffByte < 0) {
-			throw new IOException("File ended");
-		}
-		int diffGreen = chunkByte - 128 - 32;
-		int diffRed = ((diffByte >> 4) & 0x0F) - 8 + diffGreen;
-		int diffBlue = (diffByte & 0x0F) - 8 + diffGreen;
-
-		int red = QOIUtils.wrapByteValue(previousPixel.getRed() + diffRed);
-		int green = QOIUtils.wrapByteValue(previousPixel.getGreen() + diffGreen);
-		int blue = QOIUtils.wrapByteValue(previousPixel.getBlue() + diffBlue);
-		int alpha = previousPixel.getAlpha();
-		Color color = new Color(red, green, blue, alpha);
-		logger.debug("QOI_OP_LUMA (diff: [{}, {}, {}], previous: {}, color: {})", diffRed, diffGreen, diffBlue, QOIUtils.colorString(previousPixel), QOIUtils.colorString(color));
-		setNextPixel(color);
-	}
-
-	private void handleChunkRun(int chunkByte) {
-		int runLength = chunkByte - 192 + 1; // How many times to repeat previous pixel
-		logger.debug("QOI_OP_RUN (length: {})", runLength);
-		for (int i = 0; i < runLength; i++) {
-			setNextPixel(previousPixel);
-		}
-	}
-
-	private void handleChunkRGB(FileInputStream fileInputStream) throws IOException {
-		byte[] chunkData = fileInputStream.readNBytes(3);
-		if (chunkData.length != 3) {
-			throw new IOException("File ended");
-		}
-
-		int red = QOIUtils.byteToUint8(chunkData[0]);
-		int green = QOIUtils.byteToUint8(chunkData[1]);
-		int blue = QOIUtils.byteToUint8(chunkData[2]);
-		int alpha = previousPixel.getAlpha();
-		Color color = new Color(red, green, blue, alpha);
-		logger.debug("QOI_OP_RGB (color: {})", QOIUtils.colorString(color));
-		setNextPixel(color);
-	}
-
-	private void handleChunkRGBA(FileInputStream fileInputStream) throws IOException {
-		byte[] chunkData = fileInputStream.readNBytes(4);
-		if (chunkData.length != 4) {
-			throw new IOException("File ended");
-		}
-
-		int red = QOIUtils.byteToUint8(chunkData[0]);
-		int green = QOIUtils.byteToUint8(chunkData[1]);
-		int blue = QOIUtils.byteToUint8(chunkData[2]);
-		int alpha = QOIUtils.byteToUint8(chunkData[3]);
-		Color color = new Color(red, green, blue, alpha);
-		logger.debug("QOI_OP_RGBA (color: {})", QOIUtils.colorString(color));
-		setNextPixel(color);
-	}
-
-	private void setNextPixel(Color color) {
-		int pixelX = (int) (pixelIndex % image.getWidth());
-		int pixelY = (int) (pixelIndex / image.getWidth());
-		if (pixelY >= image.getHeight()) {
-			throw new IndexOutOfBoundsException("Pixel index is out of bounds for the given image");
-		}
-		image.setRGB(pixelX, pixelY, color.getRGB());
-
-		pixelArray[QOIUtils.colorHash(color)] = color;
-		previousPixel = color;
-		pixelIndex++;
 	}
 }

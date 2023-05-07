@@ -9,13 +9,10 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.Arrays;
 
 public class QOIEncoder {
 	private final static Logger logger = LogManager.getLogger(QOIEncoder.class);
-	public static final byte[] END_MARKER = {0, 0, 0, 0, 0, 0, 0, 1};
 
 	public static void main(String[] args) throws IOException {
 		if (args.length < 2) {
@@ -46,7 +43,7 @@ public class QOIEncoder {
 			byte channels = (byte) numComponents;
 			byte colorSpace = image.getColorModel().getColorSpace().isCS_sRGB()?(byte)0:1;
 
-			fileOutputStream.write(getHeaderBytes(image.getWidth(), image.getHeight(), channels, colorSpace));
+			fileOutputStream.write(QOIUtils.createHeader(image.getWidth(), image.getHeight(), channels, colorSpace));
 
 			for (int y = 0; y < image.getHeight(); y++) {
 				for (int x = 0; x < image.getWidth(); x++) {
@@ -98,17 +95,7 @@ public class QOIEncoder {
 					previousPixelColor = color;
 				}
 			}
-			fileOutputStream.write(END_MARKER);
+			fileOutputStream.write(QOIUtils.END_MARKER);
 		}
-	}
-
-	private static byte[] getHeaderBytes(int width, int height, byte channels, byte colorSpace) {
-		ByteBuffer buffer = ByteBuffer.allocate(14);
-		buffer.put("qoif".getBytes());
-		buffer.put(QOIUtils.unsignedIntToByteArray(width, ByteOrder.BIG_ENDIAN));
-		buffer.put(QOIUtils.unsignedIntToByteArray(height, ByteOrder.BIG_ENDIAN));
-		buffer.put(channels);
-		buffer.put(colorSpace);
-		return buffer.array();
 	}
 }

@@ -10,6 +10,7 @@ import java.nio.ByteOrder;
 
 public class QOIUtils {
 	private final static Logger logger = LogManager.getLogger(QOIDecoder.class);
+	public static final byte[] END_MARKER = {0, 0, 0, 0, 0, 0, 0, 1};
 
 	public static void showImage(Image image) {
 		ImageIcon icon = new ImageIcon(image);
@@ -83,5 +84,37 @@ public class QOIUtils {
 
 	public static byte[] createRGBAChunk(Color color) {
 		return new byte[] {(byte) 0xFF, (byte) (color.getRed()&0xFF), (byte) (color.getGreen()&0xFF), (byte) (color.getBlue()&0xFF), (byte) (color.getAlpha()&0xFF)};
+	}
+
+	public static Color bytesToColorRGBA(byte[] chunkData) {
+		int red = byteToUint8(chunkData[0]);
+		int green = byteToUint8(chunkData[1]);
+		int blue = byteToUint8(chunkData[2]);
+		int alpha = byteToUint8(chunkData[3]);
+		return new Color(red, green, blue, alpha);
+	}
+
+	public static Color bytesToColorRGB(byte[] chunkData, int alpha) {
+		int red = byteToUint8(chunkData[0]);
+		int green = byteToUint8(chunkData[1]);
+		int blue = byteToUint8(chunkData[2]);
+		return new Color(red, green, blue, alpha);
+	}
+
+	public static Color colorApplyDiff(Color previousPixel, int diffRed, int diffGreen, int diffBlue) {
+		int red = wrapByteValue(previousPixel.getRed() + diffRed);
+		int green = wrapByteValue(previousPixel.getGreen() + diffGreen);
+		int blue = wrapByteValue(previousPixel.getBlue() + diffBlue);
+		return new Color(red, green, blue, previousPixel.getAlpha());
+	}
+
+	public static byte[] createHeader(int width, int height, byte channels, byte colorSpace) {
+		ByteBuffer buffer = ByteBuffer.allocate(14);
+		buffer.put("qoif".getBytes());
+		buffer.put(unsignedIntToByteArray(width, ByteOrder.BIG_ENDIAN));
+		buffer.put(unsignedIntToByteArray(height, ByteOrder.BIG_ENDIAN));
+		buffer.put(channels);
+		buffer.put(colorSpace);
+		return buffer.array();
 	}
 }

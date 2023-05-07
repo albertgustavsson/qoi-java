@@ -126,4 +126,20 @@ class QOIUtilsTest {
 		assertArrayEquals(new byte[] {(byte) 0b11111111, (byte) 0, (byte) 0, (byte) 255, (byte) 255}, QOIUtils.createRGBAChunk(Color.BLUE));
 		assertArrayEquals(new byte[] {(byte) 0b11111111, (byte) 255, (byte) 255, (byte) 255, (byte) 0}, QOIUtils.createRGBAChunk(new Color(255,255,255,0)));
 	}
+
+	@Test
+	void bytesToColorRGBA() {
+	}
+
+	@Test
+	void bytesToColorRGB() {
+	}
+
+	@Test
+	void colorApplyDiff() {
+	}
+
+	@Test
+	void createHeader() {
+	}
 }
