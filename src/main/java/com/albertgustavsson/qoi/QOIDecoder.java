@@ -4,9 +4,8 @@ import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.nio.ByteOrder;
 import java.util.Arrays;
-
-import javax.swing.*;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -27,37 +26,34 @@ public class QOIDecoder {
 		String filename = args[0];
 
 		QOIDecoder decoder = new QOIDecoder();
-		BufferedImage image = decoder.getImage(filename);
+		BufferedImage image = decoder.decode(filename);
 
 		logger.debug("Image has been decoded.");
 
-		showImage(image);
-	}
-
-	private static void showImage(BufferedImage image) {
-		ImageIcon icon = new ImageIcon(image);
-		JFrame frame = new JFrame();
-		frame.setLayout(new FlowLayout());
-		frame.setSize(image.getWidth() + 50, image.getHeight() + 50);
-		JLabel lbl = new JLabel();
-		lbl.setIcon(icon);
-		frame.add(lbl);
-		frame.setVisible(true);
-		frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+		float scale;
+		if (image.getWidth() > image.getHeight()) {
+			scale = (float) 2500 /image.getWidth();
+		} else {
+			scale = (float) 1400 /image.getHeight();
+		}
+		QOIUtils.showImage(image, scale);
 	}
 
 	public QOIDecoder() {
 		Arrays.setAll(pixelArray, value -> new Color(0,0,0,0));
 	}
 
-	public BufferedImage getImage(String inputFileName) throws IOException {
+	public BufferedImage decode(String inputFileName) throws IOException {
 		try (FileInputStream fileInputStream = new FileInputStream(inputFileName)) {
 			byte[] header = fileInputStream.readNBytes(14);
 			byte[] magicBytes = Arrays.copyOfRange(header, 0, 4);
 			assert new String(magicBytes).equals("qoif");
 
-			long width = QOIUtils.byteArrayToBigEndianUnsignedInt(Arrays.copyOfRange(header, 4, 8));
-			long height = QOIUtils.byteArrayToBigEndianUnsignedInt(Arrays.copyOfRange(header, 8, 12));
+			long width = QOIUtils.byteArrayToUnsignedInt(Arrays.copyOfRange(header, 4, 8), ByteOrder.BIG_ENDIAN);
+			long height = QOIUtils.byteArrayToUnsignedInt(Arrays.copyOfRange(header, 8, 12), ByteOrder.BIG_ENDIAN);
+			if (width > Integer.MAX_VALUE || height > Integer.MAX_VALUE) {
+				throw new IllegalArgumentException("Image dimensions exceed implementation limits. The maximum supported resolution is " + Integer.MAX_VALUE + " x " + Integer.MAX_VALUE);
+			}
 
 			byte channels = header[12];
 			byte colorSpace = header[13];
